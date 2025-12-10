@@ -6,7 +6,7 @@
   "main": "index.js",
 "scripts": {
     "prestart": "npm install",
-    "start": "cd workspace && node index.js" 
+    "start": "node /app/workspace/index.js"
   },
   "keywords": [
     "whatsapp",
