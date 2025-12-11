@@ -6,7 +6,7 @@
   "main": "index.js",
 "scripts": {
     "prestart": "npm install",
-    "start": "node index.js" 
+    "start": "node /app/index.js"
   },
   "keywords": [
     "whatsapp",
