@@ -1,19 +1,14 @@
 {
-  
-  "name": "basic-whatsapp-bot",
+  "name": "whatsapp-bot",
   "version": "1.0.0",
-  "description": "Un bot de WhatsApp muy básico con un prefijo configurable.",
-  "main": "index.js",
-"scripts": {
-    "prestart": "npm install",
-    "start": "node /app/index.js"
+  "scripts": {
+    "start": "node index.js"
   },
-  "keywords": [
-    "whatsapp",
-    "bot",
-    "node"
-  ],
   "dependencies": {
-    "whatsapp-web.js": "^1.23.0"
+    "whatsapp-web.js": "^1.23.0",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
