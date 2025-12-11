@@ -168,12 +168,62 @@ client.on('authenticated', () => {
 client.on('disconnected', (reason) => {
     clientReady = false;
     console.log('⚠️ Cliente desconectado:', reason);
-    console.log('🔄 Intentando reconectar...');
+    
+    // Si fue LOGOUT, la sesión ya no sirve
+    if (reason === 'LOGOUT') {
+        console.log('🗑️  Sesión cerrada por WhatsApp. Eliminando datos...');
+        
+        const fs = require('fs');
+        const path = require('path');
+        const authPath = path.join(__dirname, '.wwebjs_auth');
+        
+        try {
+            if (fs.existsSync(authPath)) {
+                fs.rmSync(authPath, { recursive: true, force: true });
+                console.log('✅ Sesión eliminada. Reinicia el servicio para conectar de nuevo.');
+            }
+        } catch (err) {
+            console.error('❌ Error al eliminar sesión:', err.message);
+        }
+        
+        // Detener el proceso para que Koyeb/Render lo reinicie automáticamente
+        console.log('🔄 Deteniendo proceso para reinicio automático...');
+        setTimeout(() => process.exit(0), 2000);
+    } else {
+        console.log('🔄 Intentando reconectar en 5 segundos...');
+        setTimeout(() => {
+            console.log('🔄 Reiniciando cliente...');
+            client.initialize().catch(err => {
+                console.error('❌ Error al reiniciar:', err.message);
+            });
+        }, 5000);
+    }
 });
 
 client.on('auth_failure', (msg) => {
     console.error('❌ Error de autenticación:', msg);
-    console.log('💡 Puede que necesites eliminar la sesión guardada');
+    console.log('💡 La sesión guardada está corrupta o expiró');
+    
+    // Eliminar sesión corrupta
+    const fs = require('fs');
+    const path = require('path');
+    const authPath = path.join(__dirname, '.wwebjs_auth');
+    
+    try {
+        if (fs.existsSync(authPath)) {
+            console.log('🗑️  Eliminando sesión corrupta...');
+            fs.rmSync(authPath, { recursive: true, force: true });
+            console.log('✅ Sesión eliminada. Reiniciando en 3 segundos...');
+            
+            // Reiniciar el proceso
+            setTimeout(() => {
+                console.log('🔄 Reiniciando...');
+                process.exit(0);
+            }, 3000);
+        }
+    } catch (err) {
+        console.error('❌ Error al limpiar sesión:', err.message);
+    }
 });
 
 // LÓGICA DE COMANDOS EXPANDIBLE
@@ -228,21 +278,27 @@ if (PHONE_NUMBER) {
 
 console.log('⏳ Conectando...\n');
 
-client.initialize();
+// Inicializar con manejo de errores
+client.initialize().catch(err => {
+    console.error('❌ Error crítico al inicializar:', err.message);
+    console.log('🔄 Reiniciando en 10 segundos...');
+    setTimeout(() => process.exit(1), 10000);
+});
 
-// Timeout de seguridad: si después de 30 segundos no hay QR ni código
+// Timeout de seguridad: si después de 90 segundos no hay conexión
 setTimeout(() => {
-    if (!clientReady && !pairingCodeRequested) {
-        console.log('\n⚠️  TIMEOUT: No se recibió QR ni se solicitó código');
-        console.log('📋 Posibles causas:');
-        console.log('   1. Ya existe una sesión guardada válida');
-        console.log('   2. Problema de red con WhatsApp servers');
-        console.log('   3. La carpeta wwebjs_auth tiene datos corruptos');
-        console.log('\n💡 Soluciones:');
-        console.log('   - Si ya conectaste antes, el bot debería funcionar');
-        console.log('   - Si no, elimina la carpeta wwebjs_auth y redeploy\n');
+    if (!clientReady) {
+        console.log('\n⚠️  TIMEOUT: No se pudo conectar en 90 segundos');
+        console.log('📋 Estado actual:');
+        console.log(`   - Cliente listo: ${clientReady}`);
+        console.log(`   - Código solicitado: ${pairingCodeRequested}`);
+        console.log('\n💡 Posibles causas:');
+        console.log('   1. Conexión lenta con WhatsApp servers');
+        console.log('   2. Sesión guardada corrupta');
+        console.log('   3. Problema de red en el servidor');
+        console.log('\n🔄 Tip: El servicio se reiniciará automáticamente\n');
     }
-}, 30000);
+}, 90000);
 
 // Manejo de cierre graceful
 process.on('SIGINT', async () => {
@@ -261,4 +317,21 @@ process.on('SIGTERM', async () => {
         console.log('🌐 Servidor HTTP cerrado');
         process.exit(0);
     });
+});
+
+// Manejo de errores no capturados
+process.on('uncaughtException', (error) => {
+    console.error('❌ Error no capturado:', error.message);
+    
+    // Si es el error de navegación de Puppeteer, intentar limpiar
+    if (error.message.includes('Execution context was destroyed')) {
+        console.log('🔄 Detectado error de contexto. Reiniciando en 5 segundos...');
+        setTimeout(() => {
+            process.exit(1); // Exit con código 1 para que Koyeb/Render lo reinicie
+        }, 5000);
+    }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Promesa rechazada no manejada:', reason);
 });
