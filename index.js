@@ -53,10 +53,43 @@ if (FORCE_NEW_SESSION) {
     const path = require('path');
     const authPath = path.join(__dirname, '.wwebjs_auth');
     
-    if (fs.existsSync(authPath)) {
-        console.log('🗑️  Eliminando sesión anterior...');
-        fs.rmSync(authPath, { recursive: true, force: true });
-        console.log('✅ Sesión eliminada. Se creará una nueva.\n');
+    const deleteFolder = (dirPath) => {
+        if (fs.existsSync(dirPath)) {
+            try {
+                fs.rmSync(dirPath, { recursive: true, force: true, maxRetries: 3 });
+                return true;
+            } catch (err) {
+                try {
+                    const files = fs.readdirSync(dirPath);
+                    for (const file of files) {
+                        const filePath = path.join(dirPath, file);
+                        const stat = fs.statSync(filePath);
+                        if (stat.isDirectory()) {
+                            deleteFolder(filePath);
+                        } else {
+                            try {
+                                fs.unlinkSync(filePath);
+                            } catch (e) {
+                                // Ignorar archivos bloqueados
+                            }
+                        }
+                    }
+                    fs.rmdirSync(dirPath);
+                    return true;
+                } catch (err2) {
+                    return false;
+                }
+            }
+        }
+        return false;
+    };
+    
+    if (deleteFolder(authPath)) {
+        console.log('🗑️  Sesión anterior eliminada.');
+        console.log('✅ Se creará una nueva sesión.\n');
+    } else {
+        console.log('⚠️ No se pudo eliminar completamente la sesión anterior.');
+        console.log('💡 Continuando de todas formas...\n');
     }
 }
 
@@ -108,7 +141,12 @@ client.on('remote_session_saved', () => {
 // Detectar cuando el cliente está listo para solicitar pairing code
 client.on('qr', async (qr) => {
     console.log('📱 Evento QR detectado');
-    console.log('⏰ Tienes 60 segundos para escanear\n');
+    console.log('⏰ QR generado - ACCEDE A LA URL DEL SERVIDOR AHORA\n');
+    
+    // Guardar QR para mostrarlo en el navegador
+    currentQR = qr;
+    qrGeneratedAt = Date.now();
+    pairingCode = null; // Limpiar código si existe
     
     if (PHONE_NUMBER && !pairingCodeRequested) {
         console.log('🔄 Intentando cambiar a modo código de vinculación...');
@@ -118,47 +156,43 @@ client.on('qr', async (qr) => {
             // Intentar solicitar pairing code
             const code = await client.requestPairingCode(PHONE_NUMBER);
             
+            // Guardar código para mostrarlo en el navegador
+            pairingCode = code;
+            currentQR = qr; // Mantener QR como backup
+            
             console.log('\n╔════════════════════════════════════╗');
             console.log('║   CÓDIGO DE VINCULACIÓN WHATSAPP   ║');
             console.log('╚════════════════════════════════════╝');
-            console.log('');
-            console.log('📱 Abre WhatsApp en tu teléfono');
-            console.log('⚙️  Ve a: Configuración > Dispositivos vinculados');
-            console.log('➕ Toca: "Vincular un dispositivo"');
-            console.log('🔢 Selecciona: "Vincular con número de teléfono"');
-            console.log('');
-            console.log('👉 INGRESA ESTE CÓDIGO:');
             console.log('');
             console.log(`   ╔═══════════╗`);
             console.log(`   ║  ${code}  ║`);
             console.log(`   ╚═══════════╝`);
             console.log('');
-            console.log('⏳ El código expira en pocos minutos...');
-            console.log('⚠️  Si no funciona, escanea el QR que aparece abajo\n');
+            console.log('⚠️  SI LOS LOGS TARDAN, abre la URL del servidor en tu navegador');
+            console.log('    para ver el código en tiempo real\n');
             
         } catch (error) {
             console.log('\n⚠️  Error al solicitar código:', error.message);
-            console.log('🔄 Usando QR Code como alternativa\n');
+            console.log('🔄 Usa el QR desde el navegador\n');
         }
     }
     
-    // Siempre mostrar QR como backup
-    if (!PHONE_NUMBER || pairingCodeRequested) {
-        console.log('--- ESCANEA ESTE QR CODE ---');
-        const qrcodeTerminal = require('qrcode-terminal');
-        qrcodeTerminal.generate(qr, { small: true });
-        
-        // ✅ NUEVO: URL para escanear desde otro dispositivo
-        console.log('\n🔗 O escanea desde esta URL:');
-        console.log(`   https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`);
-        console.log('\n💡 Tip: El QR se regenera cada 60 segundos\n');
-    }
+    // Siempre mostrar QR en logs como backup
+    console.log('--- QR CODE (también disponible en el navegador) ---');
+    const qrcodeTerminal = require('qrcode-terminal');
+    qrcodeTerminal.generate(qr, { small: true });
+    console.log('\n🔗 URL del QR:');
+    console.log(`   https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`);
+    console.log('\n💡 Tip: Abre la URL de tu servicio en el navegador para ver el QR en tiempo real\n');
 });
 
 client.on('ready', () => {
     clientReady = true;
+    currentQR = null; // Limpiar QR cuando se conecta
+    pairingCode = null;
     console.log('✅ ¡CLIENTE LISTO! Bot conectado y funcionando.');
     console.log(`📞 Número conectado: ${client.info.wid.user}`);
+    console.log('🌐 Ahora puedes cerrar el navegador, el bot está funcionando\n');
 });
 
 client.on('authenticated', () => {
@@ -177,13 +211,46 @@ client.on('disconnected', (reason) => {
         const path = require('path');
         const authPath = path.join(__dirname, '.wwebjs_auth');
         
-        try {
-            if (fs.existsSync(authPath)) {
-                fs.rmSync(authPath, { recursive: true, force: true });
-                console.log('✅ Sesión eliminada. Reinicia el servicio para conectar de nuevo.');
+        // Función recursiva mejorada para eliminar directorios
+        const deleteFolder = (dirPath) => {
+            if (fs.existsSync(dirPath)) {
+                try {
+                    // Primero intentar con force
+                    fs.rmSync(dirPath, { recursive: true, force: true, maxRetries: 3 });
+                    return true;
+                } catch (err) {
+                    console.log('⚠️ rmSync falló, intentando método alternativo...');
+                    try {
+                        // Método alternativo: eliminar archivos uno por uno
+                        const files = fs.readdirSync(dirPath);
+                        for (const file of files) {
+                            const filePath = path.join(dirPath, file);
+                            const stat = fs.statSync(filePath);
+                            if (stat.isDirectory()) {
+                                deleteFolder(filePath);
+                            } else {
+                                try {
+                                    fs.unlinkSync(filePath);
+                                } catch (e) {
+                                    console.log(`⚠️ No se pudo eliminar: ${filePath}`);
+                                }
+                            }
+                        }
+                        fs.rmdirSync(dirPath);
+                        return true;
+                    } catch (err2) {
+                        console.error('❌ Error al eliminar sesión:', err2.message);
+                        return false;
+                    }
+                }
             }
-        } catch (err) {
-            console.error('❌ Error al eliminar sesión:', err.message);
+            return false;
+        };
+        
+        if (deleteFolder(authPath)) {
+            console.log('✅ Sesión eliminada correctamente.');
+        } else {
+            console.log('⚠️ No se pudo eliminar completamente, pero se reiniciará igual.');
         }
         
         // Detener el proceso para que Koyeb/Render lo reinicie automáticamente
@@ -204,26 +271,54 @@ client.on('auth_failure', (msg) => {
     console.error('❌ Error de autenticación:', msg);
     console.log('💡 La sesión guardada está corrupta o expiró');
     
-    // Eliminar sesión corrupta
+    // Eliminar sesión corrupta con función mejorada
     const fs = require('fs');
     const path = require('path');
     const authPath = path.join(__dirname, '.wwebjs_auth');
     
-    try {
-        if (fs.existsSync(authPath)) {
-            console.log('🗑️  Eliminando sesión corrupta...');
-            fs.rmSync(authPath, { recursive: true, force: true });
-            console.log('✅ Sesión eliminada. Reiniciando en 3 segundos...');
-            
-            // Reiniciar el proceso
-            setTimeout(() => {
-                console.log('🔄 Reiniciando...');
-                process.exit(0);
-            }, 3000);
+    const deleteFolder = (dirPath) => {
+        if (fs.existsSync(dirPath)) {
+            try {
+                fs.rmSync(dirPath, { recursive: true, force: true, maxRetries: 3 });
+                return true;
+            } catch (err) {
+                console.log('⚠️ Usando método alternativo de eliminación...');
+                try {
+                    const files = fs.readdirSync(dirPath);
+                    for (const file of files) {
+                        const filePath = path.join(dirPath, file);
+                        const stat = fs.statSync(filePath);
+                        if (stat.isDirectory()) {
+                            deleteFolder(filePath);
+                        } else {
+                            try {
+                                fs.unlinkSync(filePath);
+                            } catch (e) {
+                                // Ignorar archivos bloqueados
+                            }
+                        }
+                    }
+                    fs.rmdirSync(dirPath);
+                    return true;
+                } catch (err2) {
+                    return false;
+                }
+            }
         }
-    } catch (err) {
-        console.error('❌ Error al limpiar sesión:', err.message);
+        return false;
+    };
+    
+    if (deleteFolder(authPath)) {
+        console.log('✅ Sesión eliminada. Reiniciando en 3 segundos...');
+    } else {
+        console.log('⚠️ Sesión no eliminada completamente, pero reiniciando igual...');
     }
+    
+    // Reiniciar el proceso
+    setTimeout(() => {
+        console.log('🔄 Reiniciando...');
+        process.exit(0);
+    }, 3000);
 });
 
 // LÓGICA DE COMANDOS EXPANDIBLE
