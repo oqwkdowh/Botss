@@ -4,10 +4,8 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const PREFIX = process.env.PREFIX || '!'; 
 console.log(`Prefijo del Bot configurado a: ${PREFIX}`);
 
-// 2. IMPORTANTE: Define tu número de teléfono para pairing code
-// Formato: código de país + número (sin +, espacios ni guiones)
-// Ejemplo: Para +51 987654321 usa: '51987654321'
-const PHONE_NUMBER = process.env.PHONE_NUMBER || ''; // ⚠️ CONFIGURA ESTO
+// 2. Número de teléfono para pairing code (formato: código país + número)
+const PHONE_NUMBER = process.env.PHONE_NUMBER || '';
 
 // Inicializa el cliente de WhatsApp
 const client = new Client({
@@ -23,35 +21,60 @@ const client = new Client({
             '--no-zygote',
             '--disable-gpu'
         ]
+    },
+    // ✅ NUEVO: Habilitar pairing code en las opciones del cliente
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
     }
 });
 
+// Variable para controlar si ya se solicitó el código
+let pairingCodeRequested = false;
+
 // EVENTOS DE CONEXIÓN
 
-// Evento cuando se genera el código de vinculación
-client.on('code', (code) => {
-    console.log('\n╔════════════════════════════════════╗');
-    console.log('║   CÓDIGO DE VINCULACIÓN WHATSAPP   ║');
-    console.log('╚════════════════════════════════════╝');
-    console.log('');
-    console.log('📱 Abre WhatsApp en tu teléfono');
-    console.log('⚙️  Ve a: Configuración > Dispositivos vinculados');
-    console.log('➕ Toca: "Vincular un dispositivo"');
-    console.log('🔢 Selecciona: "Vincular con número de teléfono"');
-    console.log('');
-    console.log('👉 INGRESA ESTE CÓDIGO:');
-    console.log('');
-    console.log(`   ╔═══════════╗`);
-    console.log(`   ║  ${code}  ║`);
-    console.log(`   ╚═══════════╝`);
-    console.log('');
-    console.log('⏳ El código expira en unos minutos...\n');
-});
-
-// Evento QR (no debería activarse si usas pairing code)
-client.on('qr', (qr) => {
-    console.log('⚠️  Se generó QR en lugar de código.');
-    console.log('💡 Verifica que PHONE_NUMBER esté configurado correctamente.\n');
+// Detectar cuando el cliente está listo para solicitar pairing code
+client.on('qr', async (qr) => {
+    if (PHONE_NUMBER && !pairingCodeRequested) {
+        console.log('🔄 Intentando cambiar a modo código de vinculación...');
+        pairingCodeRequested = true;
+        
+        try {
+            // Intentar solicitar pairing code
+            const code = await client.requestPairingCode(PHONE_NUMBER);
+            
+            console.log('\n╔════════════════════════════════════╗');
+            console.log('║   CÓDIGO DE VINCULACIÓN WHATSAPP   ║');
+            console.log('╚════════════════════════════════════╝');
+            console.log('');
+            console.log('📱 Abre WhatsApp en tu teléfono');
+            console.log('⚙️  Ve a: Configuración > Dispositivos vinculados');
+            console.log('➕ Toca: "Vincular un dispositivo"');
+            console.log('🔢 Selecciona: "Vincular con número de teléfono"');
+            console.log('');
+            console.log('👉 INGRESA ESTE CÓDIGO:');
+            console.log('');
+            console.log(`   ╔═══════════╗`);
+            console.log(`   ║  ${code}  ║`);
+            console.log(`   ╚═══════════╝`);
+            console.log('');
+            console.log('⏳ El código expira en unos minutos...\n');
+            
+        } catch (error) {
+            console.log('\n⚠️  No se pudo generar código de vinculación');
+            console.log('📱 Tu versión de whatsapp-web.js no soporta pairing code');
+            console.log('🔄 Usa el QR Code que aparece arriba para conectar\n');
+            
+            // Mostrar QR como fallback
+            const qrcodeTerminal = require('qrcode-terminal');
+            qrcodeTerminal.generate(qr, { small: true });
+        }
+    } else if (!PHONE_NUMBER) {
+        console.log('⚠️  PHONE_NUMBER no configurado, usando QR Code...\n');
+        const qrcodeTerminal = require('qrcode-terminal');
+        qrcodeTerminal.generate(qr, { small: true });
+    }
 });
 
 client.on('ready', () => {
@@ -112,34 +135,18 @@ client.on('message', async msg => {
 
 });
 
-// Inicializar el cliente con pairing code
-async function initializeClient() {
-    console.log('🚀 Iniciando WhatsApp Bot...');
-    
-    if (!PHONE_NUMBER) {
-        console.error('\n❌ ERROR: PHONE_NUMBER no está configurado');
-        console.log('📝 Configura la variable de entorno PHONE_NUMBER en Koyeb');
-        console.log('   Formato: código de país + número (sin +, espacios ni guiones)');
-        console.log('   Ejemplo: 51987654321 para Perú\n');
-        process.exit(1);
-    }
+// Inicializar el cliente
+console.log('🚀 Iniciando WhatsApp Bot...');
 
-    console.log(`📱 Solicitando código para: +${PHONE_NUMBER}`);
-    console.log('⏳ Generando código de vinculación...\n');
-    
-    await client.initialize();
-    
-    // Solicitar el pairing code después de inicializar
-    setTimeout(async () => {
-        try {
-            await client.requestPairingCode(PHONE_NUMBER);
-        } catch (error) {
-            console.error('❌ Error al solicitar código:', error.message);
-        }
-    }, 3000); // Espera 3 segundos para que el cliente esté listo
+if (PHONE_NUMBER) {
+    console.log(`📱 Intentando modo código para: +${PHONE_NUMBER}`);
+} else {
+    console.log('📱 Modo QR Code (configura PHONE_NUMBER para código)');
 }
 
-initializeClient();
+console.log('⏳ Conectando...\n');
+
+client.initialize();
 
 // Manejo de cierre graceful
 process.on('SIGINT', async () => {
