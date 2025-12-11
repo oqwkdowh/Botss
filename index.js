@@ -1,8 +1,30 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
+const http = require('http');
 
 // 1. Configuración del Prefijo
 const PREFIX = process.env.PREFIX || '!'; 
 console.log(`Prefijo del Bot configurado a: ${PREFIX}`);
+
+// 2. Servidor HTTP para health check de Koyeb
+const PORT = process.env.PORT || 8000;
+const server = http.createServer((req, res) => {
+    if (req.url === '/health' || req.url === '/') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+            status: 'ok', 
+            bot: 'running',
+            prefix: PREFIX,
+            timestamp: new Date().toISOString()
+        }));
+    } else {
+        res.writeHead(404);
+        res.end('Not Found');
+    }
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`🌐 Servidor HTTP escuchando en puerto ${PORT}`);
+});
 
 // 2. Número de teléfono para pairing code (formato: código país + número)
 const PHONE_NUMBER = process.env.PHONE_NUMBER || '';
@@ -152,5 +174,17 @@ client.initialize();
 process.on('SIGINT', async () => {
     console.log('\n⏹️  Cerrando bot...');
     await client.destroy();
-    process.exit(0);
+    server.close(() => {
+        console.log('🌐 Servidor HTTP cerrado');
+        process.exit(0);
+    });
+});
+
+process.on('SIGTERM', async () => {
+    console.log('\n⏹️  Señal de terminación recibida...');
+    await client.destroy();
+    server.close(() => {
+        console.log('🌐 Servidor HTTP cerrado');
+        process.exit(0);
+    });
 });
