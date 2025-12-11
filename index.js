@@ -7,27 +7,58 @@ console.log(`Prefijo del Bot configurado a: ${PREFIX}`);
 
 // 2. Servidor HTTP para health check de Koyeb
 const PORT = process.env.PORT || 8000;
+
+console.log(`🔧 Configuración del servidor:`);
+console.log(`   - Puerto: ${PORT}`);
+console.log(`   - Host: 0.0.0.0`);
+
 const server = http.createServer((req, res) => {
+    console.log(`📥 Petición recibida: ${req.method} ${req.url}`);
+    
     if (req.url === '/health' || req.url === '/') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ 
+        const response = { 
             status: 'ok', 
             bot: 'running',
             prefix: PREFIX,
+            whatsapp: client.info ? 'connected' : 'connecting',
             timestamp: new Date().toISOString()
-        }));
+        };
+        res.end(JSON.stringify(response, null, 2));
+        console.log(`✅ Health check respondido correctamente`);
     } else {
-        res.writeHead(404);
-        res.end('Not Found');
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Not Found - Try /health endpoint');
     }
 });
 
+server.on('error', (err) => {
+    console.error('❌ Error en el servidor:', err);
+});
+
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`🌐 Servidor HTTP escuchando en puerto ${PORT}`);
+    console.log(`✅ Servidor HTTP escuchando en 0.0.0.0:${PORT}`);
+    console.log(`   Endpoints disponibles:`);
+    console.log(`   - GET /health (health check)`);
+    console.log(`   - GET / (status)\n`);
 });
 
 // 2. Número de teléfono para pairing code (formato: código país + número)
 const PHONE_NUMBER = process.env.PHONE_NUMBER || '';
+const FORCE_NEW_SESSION = process.env.FORCE_NEW_SESSION === 'true';
+
+// Si se fuerza sesión nueva, eliminar la carpeta de autenticación
+if (FORCE_NEW_SESSION) {
+    const fs = require('fs');
+    const path = require('path');
+    const authPath = path.join(__dirname, '.wwebjs_auth');
+    
+    if (fs.existsSync(authPath)) {
+        console.log('🗑️  Eliminando sesión anterior...');
+        fs.rmSync(authPath, { recursive: true, force: true });
+        console.log('✅ Sesión eliminada. Se creará una nueva.\n');
+    }
+}
 
 // Inicializa el cliente de WhatsApp
 const client = new Client({
@@ -41,23 +72,44 @@ const client = new Client({
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--disable-gpu'
-        ]
+            '--single-process', // ✅ NUEVO: Evita múltiples procesos
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-features=IsolateOrigins,site-per-process'
+        ],
+        // ✅ IMPORTANTE: Aumentar timeout para conexiones lentas
+        timeout: 60000
     },
-    // ✅ NUEVO: Habilitar pairing code en las opciones del cliente
+    // ✅ Usar versión estable de WhatsApp Web
     webVersionCache: {
         type: 'remote',
         remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
-    }
+    },
+    // ✅ Configuración adicional para estabilidad
+    qrMaxRetries: 5
 });
 
 // Variable para controlar si ya se solicitó el código
 let pairingCodeRequested = false;
+let clientReady = false;
 
 // EVENTOS DE CONEXIÓN
 
+// Evento loading - nos dice qué está haciendo el cliente
+client.on('loading_screen', (percent, message) => {
+    console.log(`⏳ Cargando WhatsApp: ${percent}% - ${message}`);
+});
+
+// ✅ NUEVO: Detectar cuando se está generando el QR
+client.on('remote_session_saved', () => {
+    console.log('💾 Sesión guardada en WhatsApp servers');
+});
+
 // Detectar cuando el cliente está listo para solicitar pairing code
 client.on('qr', async (qr) => {
+    console.log('📱 Evento QR detectado');
+    console.log('⏰ Tienes 60 segundos para escanear\n');
+    
     if (PHONE_NUMBER && !pairingCodeRequested) {
         console.log('🔄 Intentando cambiar a modo código de vinculación...');
         pairingCodeRequested = true;
@@ -81,25 +133,30 @@ client.on('qr', async (qr) => {
             console.log(`   ║  ${code}  ║`);
             console.log(`   ╚═══════════╝`);
             console.log('');
-            console.log('⏳ El código expira en unos minutos...\n');
+            console.log('⏳ El código expira en pocos minutos...');
+            console.log('⚠️  Si no funciona, escanea el QR que aparece abajo\n');
             
         } catch (error) {
-            console.log('\n⚠️  No se pudo generar código de vinculación');
-            console.log('📱 Tu versión de whatsapp-web.js no soporta pairing code');
-            console.log('🔄 Usa el QR Code que aparece arriba para conectar\n');
-            
-            // Mostrar QR como fallback
-            const qrcodeTerminal = require('qrcode-terminal');
-            qrcodeTerminal.generate(qr, { small: true });
+            console.log('\n⚠️  Error al solicitar código:', error.message);
+            console.log('🔄 Usando QR Code como alternativa\n');
         }
-    } else if (!PHONE_NUMBER) {
-        console.log('⚠️  PHONE_NUMBER no configurado, usando QR Code...\n');
+    }
+    
+    // Siempre mostrar QR como backup
+    if (!PHONE_NUMBER || pairingCodeRequested) {
+        console.log('--- ESCANEA ESTE QR CODE ---');
         const qrcodeTerminal = require('qrcode-terminal');
         qrcodeTerminal.generate(qr, { small: true });
+        
+        // ✅ NUEVO: URL para escanear desde otro dispositivo
+        console.log('\n🔗 O escanea desde esta URL:');
+        console.log(`   https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`);
+        console.log('\n💡 Tip: El QR se regenera cada 60 segundos\n');
     }
 });
 
 client.on('ready', () => {
+    clientReady = true;
     console.log('✅ ¡CLIENTE LISTO! Bot conectado y funcionando.');
     console.log(`📞 Número conectado: ${client.info.wid.user}`);
 });
@@ -109,11 +166,14 @@ client.on('authenticated', () => {
 });
 
 client.on('disconnected', (reason) => {
+    clientReady = false;
     console.log('⚠️ Cliente desconectado:', reason);
+    console.log('🔄 Intentando reconectar...');
 });
 
 client.on('auth_failure', (msg) => {
     console.error('❌ Error de autenticación:', msg);
+    console.log('💡 Puede que necesites eliminar la sesión guardada');
 });
 
 // LÓGICA DE COMANDOS EXPANDIBLE
@@ -169,6 +229,20 @@ if (PHONE_NUMBER) {
 console.log('⏳ Conectando...\n');
 
 client.initialize();
+
+// Timeout de seguridad: si después de 30 segundos no hay QR ni código
+setTimeout(() => {
+    if (!clientReady && !pairingCodeRequested) {
+        console.log('\n⚠️  TIMEOUT: No se recibió QR ni se solicitó código');
+        console.log('📋 Posibles causas:');
+        console.log('   1. Ya existe una sesión guardada válida');
+        console.log('   2. Problema de red con WhatsApp servers');
+        console.log('   3. La carpeta wwebjs_auth tiene datos corruptos');
+        console.log('\n💡 Soluciones:');
+        console.log('   - Si ya conectaste antes, el bot debería funcionar');
+        console.log('   - Si no, elimina la carpeta wwebjs_auth y redeploy\n');
+    }
+}, 30000);
 
 // Manejo de cierre graceful
 process.on('SIGINT', async () => {

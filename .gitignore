@@ -1,3 +1,19 @@
-/node_modules
-/.wwebjs_auth
-npm-debug.log
+
+# Dependencias
+node_modules/
+
+# Archivos de sesión de WhatsApp
+.wwebjs_auth/
+wwebjs_auth/
+
+# Variables de entorno
+.env
+.env.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
