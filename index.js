@@ -1,9 +1,13 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 
 // 1. Configuración del Prefijo
-// Si la variable de entorno PREFIX está definida, úsala. Si no, usa '!' por defecto.
 const PREFIX = process.env.PREFIX || '!'; 
 console.log(`Prefijo del Bot configurado a: ${PREFIX}`);
+
+// 2. IMPORTANTE: Define tu número de teléfono para pairing code
+// Formato: código de país + número (sin +, espacios ni guiones)
+// Ejemplo: Para +51 987654321 usa: '51987654321'
+const PHONE_NUMBER = process.env.PHONE_NUMBER || ''; // ⚠️ CONFIGURA ESTO
 
 // Inicializa el cliente de WhatsApp
 const client = new Client({
@@ -24,7 +28,7 @@ const client = new Client({
 
 // EVENTOS DE CONEXIÓN
 
-// ✅ NUEVO: Evento para el código de vinculación de 8 dígitos
+// Evento cuando se genera el código de vinculación
 client.on('code', (code) => {
     console.log('\n╔════════════════════════════════════╗');
     console.log('║   CÓDIGO DE VINCULACIÓN WHATSAPP   ║');
@@ -44,13 +48,15 @@ client.on('code', (code) => {
     console.log('⏳ El código expira en unos minutos...\n');
 });
 
-// Evento QR (backup, por si no se genera código)
+// Evento QR (no debería activarse si usas pairing code)
 client.on('qr', (qr) => {
-    console.log('⚠️  QR Code generado (si prefieres código, ignora esto)');
+    console.log('⚠️  Se generó QR en lugar de código.');
+    console.log('💡 Verifica que PHONE_NUMBER esté configurado correctamente.\n');
 });
 
 client.on('ready', () => {
-    console.log('¡CLIENTE LISTO! Bot conectado y funcionando.');
+    console.log('✅ ¡CLIENTE LISTO! Bot conectado y funcionando.');
+    console.log(`📞 Número conectado: ${client.info.wid.user}`);
 });
 
 client.on('authenticated', () => {
@@ -106,11 +112,34 @@ client.on('message', async msg => {
 
 });
 
-// Inicializar el cliente
-console.log('🚀 Iniciando WhatsApp Bot...');
-console.log('⏳ Solicitando código de vinculación...\n');
+// Inicializar el cliente con pairing code
+async function initializeClient() {
+    console.log('🚀 Iniciando WhatsApp Bot...');
+    
+    if (!PHONE_NUMBER) {
+        console.error('\n❌ ERROR: PHONE_NUMBER no está configurado');
+        console.log('📝 Configura la variable de entorno PHONE_NUMBER en Koyeb');
+        console.log('   Formato: código de país + número (sin +, espacios ni guiones)');
+        console.log('   Ejemplo: 51987654321 para Perú\n');
+        process.exit(1);
+    }
 
-client.initialize();
+    console.log(`📱 Solicitando código para: +${PHONE_NUMBER}`);
+    console.log('⏳ Generando código de vinculación...\n');
+    
+    await client.initialize();
+    
+    // Solicitar el pairing code después de inicializar
+    setTimeout(async () => {
+        try {
+            await client.requestPairingCode(PHONE_NUMBER);
+        } catch (error) {
+            console.error('❌ Error al solicitar código:', error.message);
+        }
+    }, 3000); // Espera 3 segundos para que el cliente esté listo
+}
+
+initializeClient();
 
 // Manejo de cierre graceful
 process.on('SIGINT', async () => {
